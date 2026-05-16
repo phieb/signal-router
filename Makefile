@@ -1,4 +1,4 @@
-.PHONY: build up down register verify logs
+.PHONY: build up down link register verify logs
 
 include .env
 export
@@ -12,7 +12,11 @@ up:
 down:
 	docker compose down
 
-# Step 1 — request SMS verification code
+# Link as secondary device (scan the printed URL as a QR code in Signal → Settings → Linked Devices)
+link:
+	docker compose run --rm signal-cli link -n "signal-router"
+
+# Step 1 — request SMS verification code (for new/dedicated numbers)
 register:
 	docker compose run --rm signal-cli -a $(SIGNAL_PHONE_NUMBER) register
 

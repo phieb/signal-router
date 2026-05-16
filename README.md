@@ -45,39 +45,30 @@ networks:
   signal-net:
 ```
 
-Then register and start:
+Then connect your number (see [Connecting a number](#connecting-a-number) below) and start:
 
 ```bash
-docker compose run --rm signal-cli -a +43XXXXXXXXX register
-docker compose run --rm signal-cli -a +43XXXXXXXXX verify 123456
 docker compose up -d
 ```
 
 ## Development setup (build from source)
 
-Clone the repo and use the `Makefile`:
-
 ```bash
 git clone https://github.com/phieb/signal-router.git
 cd signal-router
 cp .env.example .env  # edit to taste
-make register
-make verify CODE=123456
-make up
 ```
+
+See the [Makefile reference](#makefile-reference) for register/link/verify commands.
 
 ## Requirements
 
 - Docker + Docker Compose
-- A phone number that can receive SMS (for registration)
+- A Signal account (phone number)
 
 ## Configuration
 
-```bash
-cp .env.example .env
-```
-
-Edit `.env` — all options:
+Copy `.env.example` to `.env` and fill in your values:
 
 ```env
 SIGNAL_PHONE_NUMBER=+43123456789
@@ -87,23 +78,39 @@ ALLOWED_SENDERS=              # optional, comma-separated whitelist e.g. +43111,
 LOG_LEVEL=INFO
 ```
 
-### 2. Register your number (one-time)
+## Connecting a number
+
+There are two ways to connect a phone number. Choose the one that fits your situation:
+
+### Option A — Link as secondary device (recommended)
+
+Use this if the number already has a Signal account on your phone. signal-cli becomes a secondary device alongside your phone — **your existing account, contacts, and message history are preserved**.
 
 ```bash
-make register        # Signal sends an SMS with a verification code
+# pre-built image:
+docker compose run --rm signal-cli link -n "signal-router"
+
+# from source:
+make link
+```
+
+This prints a `sgnl://linkdevice?...` URL. Convert it to a QR code (e.g. `qrencode -t ansi '<url>'` or any online tool), then scan it in the Signal app on your phone under **Settings → Linked Devices → Link New Device**.
+
+### Option B — Register a new account
+
+Use this if the number has no existing Signal account, or you're using a dedicated SIM/VoIP number just for this service. **This displaces any existing Signal account on the number.**
+
+```bash
+# pre-built image:
+docker compose run --rm signal-cli -a +43XXXXXXXXX register
+docker compose run --rm signal-cli -a +43XXXXXXXXX verify 123456
+
+# from source:
+make register
 make verify CODE=123456
 ```
 
-This runs signal-cli in a temporary container against the same persistent volume, so credentials are in place before the daemon starts.
-
-### 3. Start
-
-```bash
-make up
-make logs
-```
-
-You should see `connected` in the router logs within a few seconds.
+Signal sends a verification code via SMS. After verifying, start the services normally.
 
 ## Webhook payload
 
@@ -155,7 +162,8 @@ signal-cli uses the official image published by the signal-cli author:
 
 | Command | Description |
 |---|---|
-| `make register` | Request SMS verification code |
+| `make link` | Link as secondary device (prints QR-scannable URL) |
+| `make register` | Register a new account (request SMS code) |
 | `make verify CODE=xxxxxx` | Complete registration |
 | `make up` | Start both services |
 | `make down` | Stop both services |
