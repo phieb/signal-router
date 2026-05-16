@@ -69,14 +69,23 @@ async def discover_phone_number() -> str:
                     f"{SIGNAL_HTTP_URL}/v1/accounts",
                     timeout=aiohttp.ClientTimeout(total=5),
                 ) as resp:
-                    data = await resp.json()
-                    if data:
-                        if len(data) > 1:
-                            log.warning("signal-cli has %d accounts, using first: %s", len(data), data[0])
-                        else:
-                            log.info("discovered phone number: %s", data[0])
-                        return data[0]
-                    log.warning("signal-cli returned empty accounts list, retrying in %ds", backoff)
+                    if resp.status == 404:
+                        log.warning(
+                            "signal-cli has no accounts registered — "
+                            "run: docker compose run --rm signal-cli link -n signal-router "
+                            "— retrying in %ds", backoff
+                        )
+                    elif resp.status != 200:
+                        log.warning("signal-cli /v1/accounts returned %s — retrying in %ds", resp.status, backoff)
+                    else:
+                        data = await resp.json()
+                        if data:
+                            if len(data) > 1:
+                                log.warning("signal-cli has %d accounts, using first: %s", len(data), data[0])
+                            else:
+                                log.info("discovered phone number: %s", data[0])
+                            return data[0]
+                        log.warning("signal-cli returned empty accounts list, retrying in %ds", backoff)
         except aiohttp.ClientConnectorError as exc:
             if exc.os_error and exc.os_error.errno == errno.ECONNREFUSED:
                 log.warning(
