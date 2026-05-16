@@ -1,12 +1,13 @@
 services:
   signal-cli:
-    image: ghcr.io/asamk/signal-cli:latest-native
+    image: bbernhard/signal-cli-rest-api:latest
     restart: unless-stopped
-    command: >
-      -a ${SIGNAL_PHONE_NUMBER}
-      daemon --tcp 0.0.0.0:7583
+    environment:
+      MODE: json-rpc
+    ports:
+      - "8080:8080"  # expose for register/link via curl; consumers reach it on the docker network
     volumes:
-      - signal-data:/var/lib/signal-cli
+      - signal-data:/home/.local/share/signal-cli
     networks:
       - signal-net
 
@@ -14,7 +15,7 @@ services:
     build: .
     restart: unless-stopped
     environment:
-      SIGNAL_CLI_URL: tcp://signal-cli:7583
+      SIGNAL_CLI_URL: http://signal-cli:8080
       WEBHOOK_URLS: ${WEBHOOK_URLS}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
       ALLOWLIST_SENDERS: ${ALLOWLIST_SENDERS:-}

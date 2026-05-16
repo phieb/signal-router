@@ -18,28 +18,19 @@ logging.basicConfig(
 log = logging.getLogger("signal-router")
 
 
-def _parse_endpoint(url: str) -> tuple[str, int]:
+def _normalize_url(url: str) -> str:
     url = url.strip().rstrip("/")
-    if "://" in url:
-        scheme, _, rest = url.partition("://")
-        if scheme != "tcp":
-            raise ValueError(
-                f"SIGNAL_CLI_URL scheme {scheme!r} not supported — "
-                "use tcp://host:port (signal-cli must run with `daemon --tcp`)"
-            )
-        url = rest
-    host, _, port = url.partition(":")
-    if not host or not port:
-        raise ValueError(f"SIGNAL_CLI_URL must be host:port, got {url!r}")
-    return host, int(port)
+    if "://" not in url:
+        url = "http://" + url
+    return url
 
 
-SIGNAL_CLI_HOST, SIGNAL_CLI_PORT = _parse_endpoint(os.environ["SIGNAL_CLI_URL"])
+SIGNAL_CLI_URL = _normalize_url(os.environ["SIGNAL_CLI_URL"])
 SIGNAL_PHONE_NUMBER = os.getenv("SIGNAL_PHONE_NUMBER", "").strip() or None
 WEBHOOK_URLS = [u.strip() for u in os.environ["WEBHOOK_URLS"].split(",") if u.strip()]
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 API_KEY = os.getenv("API_KEY", "")
-SEND_PORT = 8081
+ROUTER_PORT = 8081
 SENDERS_FILE = Path(os.getenv("SENDERS_FILE", "/data/senders.json"))
 ALLOWLIST_SENDERS = os.getenv("ALLOWLIST_SENDERS", "").strip().lower() in ("1", "true", "yes")
 
@@ -72,76 +63,52 @@ shutdown = asyncio.Event()
 notifications: asyncio.Queue = asyncio.Queue()
 
 
-class SignalCliClient:
-    """Persistent TCP JSON-RPC client for signal-cli daemon."""
+# ── Phone number discovery ────────────────────────────────────────────────────
 
-    def __init__(self, host: str, port: int) -> None:
-        self.host = host
-        self.port = port
-        self.reader: asyncio.StreamReader | None = None
-        self.writer: asyncio.StreamWriter | None = None
-        self._next_id = 0
-        self._pending: dict[int, asyncio.Future] = {}
-        self.connected = asyncio.Event()
-
-    async def connect(self) -> None:
-        self.reader, self.writer = await asyncio.open_connection(self.host, self.port)
-        self.connected.set()
-        log.info("connected to signal-cli at %s:%d", self.host, self.port)
-
-    async def close(self) -> None:
-        self.connected.clear()
-        if self.writer:
-            try:
-                self.writer.close()
-                await self.writer.wait_closed()
-            except Exception:
-                pass
-        for fut in self._pending.values():
-            if not fut.done():
-                fut.set_exception(ConnectionError("signal-cli disconnected"))
-        self._pending.clear()
-
-    async def read_loop(self) -> None:
-        assert self.reader is not None
-        while True:
-            line = await self.reader.readline()
-            if not line:
-                raise ConnectionError("signal-cli closed connection")
-            try:
-                msg = json.loads(line)
-            except json.JSONDecodeError:
-                log.warning("non-JSON line from signal-cli: %s", line[:200])
-                continue
-            if "id" in msg and msg["id"] in self._pending:
-                fut = self._pending.pop(msg["id"])
-                if not fut.done():
-                    fut.set_result(msg)
-            else:
-                await notifications.put(msg)
-
-    async def call(self, method: str, params: dict | None = None, timeout: float = 30.0) -> dict:
-        if not self.writer or not self.connected.is_set():
-            raise ConnectionError("not connected to signal-cli")
-        self._next_id += 1
-        req_id = self._next_id
-        request: dict = {"jsonrpc": "2.0", "method": method, "id": req_id}
-        if params is not None:
-            request["params"] = params
-        fut: asyncio.Future = asyncio.get_event_loop().create_future()
-        self._pending[req_id] = fut
-        try:
-            self.writer.write((json.dumps(request) + "\n").encode())
-            await self.writer.drain()
-            return await asyncio.wait_for(fut, timeout=timeout)
-        finally:
-            self._pending.pop(req_id, None)
+async def discover_phone_number(session: aiohttp.ClientSession) -> str | None:
+    try:
+        async with session.get(f"{SIGNAL_CLI_URL}/v1/accounts") as resp:
+            resp.raise_for_status()
+            accounts = await resp.json()
+    except aiohttp.ClientConnectorError as exc:
+        log.warning("signal-cli not reachable at %s (%s)", SIGNAL_CLI_URL, exc)
+        return None
+    except Exception as exc:
+        log.warning("could not list accounts: %s", exc)
+        return None
+    if not accounts:
+        log.error("signal-cli has no registered account — run `make link` or `make register` first")
+        return None
+    if len(accounts) > 1:
+        log.warning(
+            "signal-cli has multiple accounts %s — using %s; set SIGNAL_PHONE_NUMBER to override",
+            accounts, accounts[0],
+        )
+    return accounts[0]
 
 
-client: SignalCliClient | None = None
+# ── Receive: WebSocket → notifications queue ──────────────────────────────────
+
+async def receive_ws(session: aiohttp.ClientSession, phone: str) -> None:
+    ws_url = SIGNAL_CLI_URL.replace("https://", "wss://").replace("http://", "ws://")
+    url = f"{ws_url}/v1/receive/{phone}"
+    log.info("connecting to %s", url)
+    async with session.ws_connect(url, heartbeat=30) as ws:
+        log.info("connected to signal-cli WebSocket")
+        async for msg in ws:
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                try:
+                    data = json.loads(msg.data)
+                except json.JSONDecodeError:
+                    log.warning("non-JSON from signal-cli: %s", msg.data[:200])
+                    continue
+                await notifications.put(data)
+            elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.ERROR):
+                break
+    raise ConnectionError("signal-cli WebSocket closed")
 
 
-# ── Receive: JSON-RPC notifications → webhooks ────────────────────────────────
+# ── Webhook fan-out ───────────────────────────────────────────────────────────
 
 async def post_webhook(session: aiohttp.ClientSession, url: str, payload: dict) -> None:
     headers = {"Content-Type": "application/json"}
@@ -163,13 +130,11 @@ async def forward(session: aiohttp.ClientSession, envelope: dict) -> None:
     await asyncio.gather(*(post_webhook(session, url, payload) for url in WEBHOOK_URLS))
 
 
-async def receiver_task() -> None:
+async def dispatcher() -> None:
     async with aiohttp.ClientSession() as session:
         while not shutdown.is_set():
-            msg = await notifications.get()
-            if msg.get("method") != "receive":
-                continue
-            envelope = msg.get("params", {}).get("envelope", {})
+            data = await notifications.get()
+            envelope = data.get("envelope") or data
             if "dataMessage" not in envelope:
                 continue
             sender = envelope.get("source") or envelope.get("sourceNumber", "")
@@ -180,39 +145,7 @@ async def receiver_task() -> None:
             await forward(session, envelope)
 
 
-# ── Send API: HTTP POST /send → JSON-RPC ──────────────────────────────────────
-
-async def handle_send(request: aiohttp.web.Request) -> aiohttp.web.Response:
-    if API_KEY and request.headers.get("X-Api-Key") != API_KEY:
-        return aiohttp.web.Response(status=401, text="Unauthorized")
-    try:
-        body = await request.json()
-    except Exception:
-        return aiohttp.web.Response(status=400, text="Invalid JSON")
-    to = body.get("to")
-    message = body.get("message")
-    if not to or not message:
-        return aiohttp.web.Response(status=400, text="Missing 'to' or 'message'")
-    recipients = [to] if isinstance(to, str) else to
-    if client is None or not client.connected.is_set():
-        return aiohttp.web.Response(status=503, text="signal-cli not connected")
-    params: dict = {"recipient": recipients, "message": message}
-    if SIGNAL_PHONE_NUMBER:
-        params["account"] = SIGNAL_PHONE_NUMBER
-    try:
-        result = await client.call("send", params)
-        if "error" in result:
-            log.error("signal-cli send error: %s", result["error"])
-            return aiohttp.web.json_response({"error": result["error"]}, status=502)
-        log.info("send to %s OK", recipients)
-        return aiohttp.web.json_response(result.get("result", {}))
-    except asyncio.TimeoutError:
-        log.error("send timed out")
-        return aiohttp.web.Response(status=504, text="signal-cli timeout")
-    except Exception as exc:
-        log.error("send failed: %s", exc)
-        return aiohttp.web.Response(status=502, text=str(exc))
-
+# ── Allowlist API ─────────────────────────────────────────────────────────────
 
 async def handle_senders_get(request: aiohttp.web.Request) -> aiohttp.web.Response:
     if API_KEY and request.headers.get("X-Api-Key") != API_KEY:
@@ -248,45 +181,53 @@ async def handle_senders_delete(request: aiohttp.web.Request) -> aiohttp.web.Res
     return aiohttp.web.json_response({"removed": number, "senders": sorted(ALLOWED_SENDERS)})
 
 
-async def run_send_api() -> None:
+async def run_router_api() -> None:
     app = aiohttp.web.Application()
-    app.router.add_post("/send", handle_send)
     app.router.add_get("/senders", handle_senders_get)
     app.router.add_post("/senders", handle_senders_post)
     app.router.add_delete("/senders/{number}", handle_senders_delete)
     runner = aiohttp.web.AppRunner(app)
     await runner.setup()
-    site = aiohttp.web.TCPSite(runner, "0.0.0.0", SEND_PORT)
+    site = aiohttp.web.TCPSite(runner, "0.0.0.0", ROUTER_PORT)
     await site.start()
-    log.info("send API listening on port %d", SEND_PORT)
+    log.info("router API listening on port %d", ROUTER_PORT)
     await shutdown.wait()
     await runner.cleanup()
 
 
-# ── Client lifecycle with reconnect ───────────────────────────────────────────
+# ── Receive loop with reconnect ───────────────────────────────────────────────
 
-async def run_client() -> None:
-    global client
+async def run_receiver() -> None:
     backoff = BACKOFF_INITIAL
-    while not shutdown.is_set():
-        client = SignalCliClient(SIGNAL_CLI_HOST, SIGNAL_CLI_PORT)
-        try:
-            await client.connect()
-            backoff = BACKOFF_INITIAL
-            await client.read_loop()
-        except (ConnectionError, OSError) as exc:
-            log.warning("signal-cli connection: %s — retrying in %ds", exc, backoff)
-        except Exception as exc:
-            log.exception("unexpected error in client: %s", exc)
-        finally:
-            await client.close()
-        if shutdown.is_set():
-            break
-        try:
-            await asyncio.wait_for(shutdown.wait(), timeout=backoff)
-        except asyncio.TimeoutError:
-            pass
-        backoff = min(backoff * BACKOFF_FACTOR, BACKOFF_MAX)
+    async with aiohttp.ClientSession() as session:
+        phone = SIGNAL_PHONE_NUMBER
+        while phone is None and not shutdown.is_set():
+            phone = await discover_phone_number(session)
+            if phone is None:
+                log.info("retrying account discovery in %ds", backoff)
+                try:
+                    await asyncio.wait_for(shutdown.wait(), timeout=backoff)
+                except asyncio.TimeoutError:
+                    pass
+                backoff = min(backoff * BACKOFF_FACTOR, BACKOFF_MAX)
+        if phone is None:
+            return
+        log.info("using phone number: %s", phone)
+        backoff = BACKOFF_INITIAL
+        while not shutdown.is_set():
+            try:
+                await receive_ws(session, phone)
+            except (aiohttp.ClientError, ConnectionError, OSError) as exc:
+                log.warning("receive connection: %s — retrying in %ds", exc, backoff)
+            except Exception:
+                log.exception("unexpected error in receiver")
+            if shutdown.is_set():
+                break
+            try:
+                await asyncio.wait_for(shutdown.wait(), timeout=backoff)
+            except asyncio.TimeoutError:
+                pass
+            backoff = min(backoff * BACKOFF_FACTOR, BACKOFF_MAX)
 
 
 def _handle_signal(signum: int, frame) -> None:
@@ -306,14 +247,14 @@ def main() -> None:
         log.warning("ALLOWLIST_SENDERS is active but senders.json is empty — no messages will be forwarded")
 
     log.info(
-        "signal-router starting | signal-cli=%s:%d phone=%s webhooks=%d allowlist=%s senders=%d send_port=%d",
-        SIGNAL_CLI_HOST, SIGNAL_CLI_PORT, SIGNAL_PHONE_NUMBER or "(auto)",
+        "signal-router starting | signal-cli=%s phone=%s webhooks=%d allowlist=%s senders=%d router_port=%d",
+        SIGNAL_CLI_URL, SIGNAL_PHONE_NUMBER or "(auto)",
         len(WEBHOOK_URLS), "on" if ALLOWLIST_SENDERS else "off",
-        len(ALLOWED_SENDERS), SEND_PORT,
+        len(ALLOWED_SENDERS), ROUTER_PORT,
     )
 
     async def _run() -> None:
-        await asyncio.gather(run_client(), receiver_task(), run_send_api())
+        await asyncio.gather(run_receiver(), dispatcher(), run_router_api())
 
     asyncio.run(_run())
     log.info("shutdown complete")

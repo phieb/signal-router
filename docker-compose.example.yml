@@ -1,13 +1,13 @@
 services:
   signal-cli:
-    image: ghcr.io/asamk/signal-cli:latest-native
+    image: bbernhard/signal-cli-rest-api:latest
     restart: unless-stopped
-    # The port in `daemon --tcp` must match the port in SIGNAL_CLI_URL below.
-    command: >
-      -a +43123456789
-      daemon --tcp 0.0.0.0:7583
+    environment:
+      MODE: json-rpc
+    ports:
+      - "8080:8080"  # expose for register/link via curl; consumers reach it on the docker network
     volumes:
-      - signal-data:/var/lib/signal-cli
+      - signal-data:/home/.local/share/signal-cli
     networks:
       - signal-net
 
@@ -15,11 +15,11 @@ services:
     image: ghcr.io/phieb/signal-router:latest
     restart: unless-stopped
     environment:
-      SIGNAL_CLI_URL: tcp://signal-cli:7583  # must match signal-cli's --tcp port above
+      SIGNAL_CLI_URL: http://signal-cli:8080
       WEBHOOK_URLS: "http://n8n:5678/webhook/signal"
       WEBHOOK_SECRET: ""         # optional, sent as X-Webhook-Secret header
       ALLOWLIST_SENDERS: "false" # set to "true" to only forward messages from numbers in /senders
-      API_KEY: ""                # optional, required as X-Api-Key header on /send
+      API_KEY: ""                # optional, required as X-Api-Key header on /senders
       LOG_LEVEL: INFO
     ports:
       - "8081:8081"
