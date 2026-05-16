@@ -3,7 +3,7 @@ services:
     image: ghcr.io/asamk/signal-cli:latest-native
     restart: unless-stopped
     command: >
-      -a ${SIGNAL_PHONE_NUMBER}
+      -a +43123456789
       daemon --http 0.0.0.0:8080
     volumes:
       - signal-data:/var/lib/signal-cli
@@ -15,11 +15,17 @@ services:
     restart: unless-stopped
     environment:
       SIGNAL_CLI_URL: ws://signal-cli:8080
-      SIGNAL_PHONE_NUMBER: ${SIGNAL_PHONE_NUMBER}
-      WEBHOOK_URLS: ${WEBHOOK_URLS}
-      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
-      ALLOWED_SENDERS: ${ALLOWED_SENDERS:-}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SIGNAL_PHONE_NUMBER: "+43123456789"
+      WEBHOOK_URLS: "http://n8n:5678/webhook/signal"
+      WEBHOOK_SECRET: ""         # optional, sent as X-Webhook-Secret header
+      ALLOWLIST_SENDERS: "false" # set to "true" to only forward messages from numbers in /senders
+      API_KEY: ""                # optional, required as X-Api-Key header on /send
+      SEND_PORT: "8080"
+      LOG_LEVEL: INFO
+    ports:
+      - "8080:8080"
+    volumes:
+      - router-data:/data
     depends_on:
       - signal-cli
     networks:
@@ -27,6 +33,7 @@ services:
 
 volumes:
   signal-data:
+  router-data:
 
 networks:
   signal-net:

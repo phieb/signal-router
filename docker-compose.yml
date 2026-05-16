@@ -18,12 +18,14 @@ services:
       SIGNAL_PHONE_NUMBER: ${SIGNAL_PHONE_NUMBER}
       WEBHOOK_URLS: ${WEBHOOK_URLS}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
-      ALLOWED_SENDERS: ${ALLOWED_SENDERS:-}
+      ALLOWLIST_SENDERS: ${ALLOWLIST_SENDERS:-}
       API_KEY: ${API_KEY:-}
       SEND_PORT: ${SEND_PORT:-8080}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "${SEND_PORT:-8080}:${SEND_PORT:-8080}"
+    volumes:
+      - router-data:/data
     depends_on:
       - signal-cli
     networks:
@@ -31,6 +33,7 @@ services:
 
 volumes:
   signal-data:
+  router-data:
 
 networks:
   signal-net:

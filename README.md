@@ -16,7 +16,7 @@ services:
     image: ghcr.io/asamk/signal-cli:latest-native
     restart: unless-stopped
     command: >
-      -a ${SIGNAL_PHONE_NUMBER}
+      -a +43123456789
       daemon --http 0.0.0.0:8080
     volumes:
       - signal-data:/var/lib/signal-cli
@@ -132,6 +132,27 @@ curl -X POST http://localhost:8080/send \
 `to` can be a single number or a list of numbers. If `API_KEY` is not set, the endpoint is unauthenticated.
 
 From another Docker container on the same network, use `http://signal-router:8080/send` as the URL.
+
+## Managing the sender allowlist
+
+Set `ALLOWLIST_SENDERS=true` to only forward messages from numbers in the allowlist. When not set (or `false`), all senders are accepted and a warning is logged on startup.
+
+The allowlist is stored in `/data/senders.json` (persisted via the `router-data` volume). It can be edited manually before starting the container, or managed at runtime via the `/senders` API without restarting. The same `API_KEY` auth applies as for `/send`.
+
+```bash
+# list current allowlist
+curl http://localhost:8080/senders -H "X-Api-Key: your_api_key"
+
+# add a number
+curl -X POST http://localhost:8080/senders \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: your_api_key" \
+  -d '{"number": "+43111222333"}'
+
+# remove a number (URL-encode the + as %2B)
+curl -X DELETE http://localhost:8080/senders/%2B43111222333 \
+  -H "X-Api-Key: your_api_key"
+```
 
 ## Webhook payload
 

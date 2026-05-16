@@ -5,6 +5,7 @@ import os
 import signal
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 import aiohttp
 import aiohttp.web
@@ -22,9 +23,31 @@ SIGNAL_CLI_URL = os.environ["SIGNAL_CLI_URL"].rstrip("/")
 SIGNAL_PHONE_NUMBER = os.environ["SIGNAL_PHONE_NUMBER"]
 WEBHOOK_URLS = [u.strip() for u in os.environ["WEBHOOK_URLS"].split(",") if u.strip()]
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
-ALLOWED_SENDERS = {s.strip() for s in os.getenv("ALLOWED_SENDERS", "").split(",") if s.strip()}
 API_KEY = os.getenv("API_KEY", "")
 SEND_PORT = int(os.getenv("SEND_PORT", "8080"))
+SENDERS_FILE = Path(os.getenv("SENDERS_FILE", "/data/senders.json"))
+ALLOWLIST_SENDERS = os.getenv("ALLOWLIST_SENDERS", "").strip().lower() in ("1", "true", "yes")
+
+
+def _load_senders() -> set[str]:
+    if SENDERS_FILE.exists():
+        try:
+            data = json.loads(SENDERS_FILE.read_text())
+            if isinstance(data, list):
+                return {s for s in data if isinstance(s, str) and s}
+        except Exception as exc:
+            log.warning("could not read %s: %s", SENDERS_FILE, exc)
+    return set()
+
+
+def _save_senders() -> None:
+    SENDERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = SENDERS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(sorted(ALLOWED_SENDERS)))
+    tmp.replace(SENDERS_FILE)
+
+
+ALLOWED_SENDERS: set[str] = _load_senders()
 
 WS_URL = f"{SIGNAL_CLI_URL}/v1/receive/{SIGNAL_PHONE_NUMBER}"
 SIGNAL_HTTP_URL = SIGNAL_CLI_URL.replace("ws://", "http://").replace("wss://", "https://")
@@ -72,7 +95,7 @@ async def handle_messages(ws, session: aiohttp.ClientSession) -> None:
             continue
 
         sender = envelope.get("source", "")
-        if ALLOWED_SENDERS and sender not in ALLOWED_SENDERS:
+        if ALLOWLIST_SENDERS and sender not in ALLOWED_SENDERS:
             log.debug("ignored message from %s (not in allowlist)", sender)
             continue
 
@@ -147,9 +170,46 @@ async def handle_send(request: aiohttp.web.Request) -> aiohttp.web.Response:
             return aiohttp.web.Response(status=502, text=str(exc))
 
 
+async def handle_senders_get(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    if API_KEY and request.headers.get("X-Api-Key") != API_KEY:
+        return aiohttp.web.Response(status=401, text="Unauthorized")
+    return aiohttp.web.json_response(sorted(ALLOWED_SENDERS) if ALLOWED_SENDERS else [])
+
+
+async def handle_senders_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    if API_KEY and request.headers.get("X-Api-Key") != API_KEY:
+        return aiohttp.web.Response(status=401, text="Unauthorized")
+    try:
+        body = await request.json()
+    except Exception:
+        return aiohttp.web.Response(status=400, text="Invalid JSON")
+    number = body.get("number", "").strip()
+    if not number:
+        return aiohttp.web.Response(status=400, text="Missing 'number'")
+    ALLOWED_SENDERS.add(number)
+    _save_senders()
+    log.info("allowlist: added %s (total: %d)", number, len(ALLOWED_SENDERS))
+    return aiohttp.web.json_response({"added": number, "senders": sorted(ALLOWED_SENDERS)})
+
+
+async def handle_senders_delete(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    if API_KEY and request.headers.get("X-Api-Key") != API_KEY:
+        return aiohttp.web.Response(status=401, text="Unauthorized")
+    number = request.match_info["number"]
+    if number not in ALLOWED_SENDERS:
+        return aiohttp.web.Response(status=404, text="Number not in allowlist")
+    ALLOWED_SENDERS.discard(number)
+    _save_senders()
+    log.info("allowlist: removed %s (total: %d)", number, len(ALLOWED_SENDERS))
+    return aiohttp.web.json_response({"removed": number, "senders": sorted(ALLOWED_SENDERS)})
+
+
 async def run_sender() -> None:
     app = aiohttp.web.Application()
     app.router.add_post("/send", handle_send)
+    app.router.add_get("/senders", handle_senders_get)
+    app.router.add_post("/senders", handle_senders_post)
+    app.router.add_delete("/senders/{number}", handle_senders_delete)
     runner = aiohttp.web.AppRunner(app)
     await runner.setup()
     site = aiohttp.web.TCPSite(runner, "0.0.0.0", SEND_PORT)
@@ -174,11 +234,17 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
+    if not ALLOWLIST_SENDERS:
+        log.warning("ALLOWLIST_SENDERS is not set — all senders accepted")
+    elif not ALLOWED_SENDERS:
+        log.warning("ALLOWLIST_SENDERS is active but senders.json is empty — no messages will be forwarded")
+
     log.info(
-        "signal-router starting | phone=%s webhooks=%d allowlist=%s send_port=%d",
+        "signal-router starting | phone=%s webhooks=%d allowlist=%s senders=%d send_port=%d",
         SIGNAL_PHONE_NUMBER,
         len(WEBHOOK_URLS),
-        ",".join(ALLOWED_SENDERS) if ALLOWED_SENDERS else "all",
+        "on" if ALLOWLIST_SENDERS else "off",
+        len(ALLOWED_SENDERS),
         SEND_PORT,
     )
 
