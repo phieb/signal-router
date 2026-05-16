@@ -18,7 +18,7 @@ services:
     # The port in `daemon --http` must match the port in SIGNAL_CLI_URL below.
     command: >
       -a +43123456789
-      daemon --http 0.0.0.0:8080
+      daemon --tcp 0.0.0.0:7583
     volumes:
       - signal-data:/var/lib/signal-cli
     networks:
@@ -28,7 +28,7 @@ services:
     image: ghcr.io/phieb/signal-router:latest
     restart: unless-stopped
     environment:
-      SIGNAL_CLI_URL: ws://signal-cli:8080  # must match signal-cli's --http port above
+      SIGNAL_CLI_URL: tcp://signal-cli:7583  # must match signal-cli's --http port above
       WEBHOOK_URLS: "http://n8n:5678/webhook/signal"
       WEBHOOK_SECRET: ""         # optional, sent as X-Webhook-Secret header
       ALLOWLIST_SENDERS: "false" # set to "true" to only forward messages from numbers in /senders
@@ -84,7 +84,7 @@ API_KEY=                      # optional, required as X-Api-Key header on /send 
 LOG_LEVEL=INFO
 ```
 
-> **Port note:** The port in signal-cli's `daemon --http 0.0.0.0:<port>` command and in `SIGNAL_CLI_URL` must always match — they refer to the same internal listener. The send API always listens on 8081 (a different port) and is not configurable.
+> **Port note:** The port in signal-cli's `daemon --tcp 0.0.0.0:<port>` command and in `SIGNAL_CLI_URL` must always match — they refer to the same internal listener. The send API always listens on 8081 (a different port) and is not configurable.
 
 ## Connecting a number
 

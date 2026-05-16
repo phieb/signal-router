@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     command: >
       -a ${SIGNAL_PHONE_NUMBER}
-      daemon --http 0.0.0.0:8080
+      daemon --tcp 0.0.0.0:7583
     volumes:
       - signal-data:/var/lib/signal-cli
     networks:
@@ -14,7 +14,7 @@ services:
     build: .
     restart: unless-stopped
     environment:
-      SIGNAL_CLI_URL: ws://signal-cli:8080
+      SIGNAL_CLI_URL: tcp://signal-cli:7583
       WEBHOOK_URLS: ${WEBHOOK_URLS}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
       ALLOWLIST_SENDERS: ${ALLOWLIST_SENDERS:-}
