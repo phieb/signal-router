@@ -19,6 +19,8 @@ services:
       WEBHOOK_URLS: ${WEBHOOK_URLS}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
       ALLOWED_SENDERS: ${ALLOWED_SENDERS:-}
+      API_KEY: ${API_KEY:-}
+      SEND_PORT: ${SEND_PORT:-8080}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       - signal-cli

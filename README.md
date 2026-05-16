@@ -32,6 +32,8 @@ services:
       WEBHOOK_URLS: ${WEBHOOK_URLS}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
       ALLOWED_SENDERS: ${ALLOWED_SENDERS:-}
+      API_KEY: ${API_KEY:-}
+      SEND_PORT: ${SEND_PORT:-8080}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       - signal-cli
@@ -73,8 +75,10 @@ Copy `.env.example` to `.env` and fill in your values:
 ```env
 SIGNAL_PHONE_NUMBER=+43123456789
 WEBHOOK_URLS=http://n8n:5678/webhook/signal
-WEBHOOK_SECRET=               # optional, sent as X-Webhook-Secret header
+WEBHOOK_SECRET=               # optional, sent as X-Webhook-Secret header when forwarding
 ALLOWED_SENDERS=              # optional, comma-separated whitelist e.g. +43111,+43222
+API_KEY=                      # optional, required as X-Api-Key header on /send requests
+SEND_PORT=8080                # port the send API listens on
 LOG_LEVEL=INFO
 ```
 
@@ -111,6 +115,19 @@ make verify CODE=123456
 ```
 
 Signal sends a verification code via SMS. After verifying, start the services normally.
+
+## Sending messages
+
+The router exposes a `POST /send` endpoint so other services (e.g. n8n) can send Signal messages without talking to signal-cli directly.
+
+```bash
+curl -X POST http://signal-router:8080/send \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: your_api_key" \
+  -d '{"to": "+43111222333", "message": "Hello from n8n!"}'
+```
+
+`to` can be a single number or a list of numbers. If `API_KEY` is not set, the endpoint is unauthenticated.
 
 ## Webhook payload
 
