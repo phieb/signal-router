@@ -1,4 +1,5 @@
 import asyncio
+import errno
 import json
 import logging
 import os
@@ -76,6 +77,16 @@ async def discover_phone_number() -> str:
                             log.info("discovered phone number: %s", data[0])
                         return data[0]
                     log.warning("signal-cli returned empty accounts list, retrying in %ds", backoff)
+        except aiohttp.ClientConnectorError as exc:
+            if exc.os_error and exc.os_error.errno == errno.ECONNREFUSED:
+                log.warning(
+                    "signal-cli is reachable but not accepting connections — "
+                    "account not registered yet? "
+                    "Run: docker compose run --rm signal-cli link -n signal-router "
+                    "— retrying in %ds", backoff
+                )
+            else:
+                log.warning("could not reach signal-cli: %s — retrying in %ds", exc, backoff)
         except Exception as exc:
             log.warning("could not reach signal-cli: %s — retrying in %ds", exc, backoff)
         await asyncio.sleep(backoff)
