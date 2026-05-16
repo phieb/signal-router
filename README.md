@@ -35,6 +35,8 @@ services:
       API_KEY: ${API_KEY:-}
       SEND_PORT: ${SEND_PORT:-8080}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "${SEND_PORT:-8080}:${SEND_PORT:-8080}"
     depends_on:
       - signal-cli
     networks:
@@ -121,13 +123,15 @@ Signal sends a verification code via SMS. After verifying, start the services no
 The router exposes a `POST /send` endpoint so other services (e.g. n8n) can send Signal messages without talking to signal-cli directly.
 
 ```bash
-curl -X POST http://signal-router:8080/send \
+curl -X POST http://localhost:8080/send \
   -H "Content-Type: application/json" \
   -H "X-Api-Key: your_api_key" \
   -d '{"to": "+43111222333", "message": "Hello from n8n!"}'
 ```
 
 `to` can be a single number or a list of numbers. If `API_KEY` is not set, the endpoint is unauthenticated.
+
+From another Docker container on the same network, use `http://signal-router:8080/send` as the URL.
 
 ## Webhook payload
 
