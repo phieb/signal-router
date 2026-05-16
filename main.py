@@ -70,9 +70,11 @@ async def discover_phone_number() -> str:
                 ) as resp:
                     data = await resp.json()
                     if data:
-                        number = data[0]
-                        log.info("discovered phone number: %s", number)
-                        return number
+                        if len(data) > 1:
+                            log.warning("signal-cli has %d accounts, using first: %s", len(data), data[0])
+                        else:
+                            log.info("discovered phone number: %s", data[0])
+                        return data[0]
                     log.warning("signal-cli returned empty accounts list, retrying in %ds", backoff)
         except Exception as exc:
             log.warning("could not reach signal-cli: %s — retrying in %ds", exc, backoff)
