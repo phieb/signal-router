@@ -31,11 +31,13 @@ services:
       SIGNAL_CLI_URL: ws://signal-cli:8080  # must match signal-cli's --http port above
       WEBHOOK_URLS: "http://n8n:5678/webhook/signal"
       WEBHOOK_SECRET: ""         # optional, sent as X-Webhook-Secret header
-      ALLOWED_SENDERS: ""        # optional, comma-separated e.g. "+43111,+43222"
+      ALLOWLIST_SENDERS: "false" # set to "true" to only forward messages from numbers in /senders
       API_KEY: ""                # optional, required as X-Api-Key header on /send
       LOG_LEVEL: INFO
     ports:
       - "8081:8081"
+    volumes:
+      - router-data:/data
     depends_on:
       - signal-cli
     networks:
@@ -43,6 +45,7 @@ services:
 
 volumes:
   signal-data:
+  router-data:
 
 networks:
   signal-net:
@@ -76,7 +79,7 @@ Copy `.env.example` to `.env` and fill in your values:
 ```env
 WEBHOOK_URLS=http://n8n:5678/webhook/signal
 WEBHOOK_SECRET=               # optional, sent as X-Webhook-Secret header when forwarding
-ALLOWED_SENDERS=              # optional, comma-separated whitelist e.g. +43111,+43222
+ALLOWLIST_SENDERS=false       # set to true to only forward messages from numbers in /senders
 API_KEY=                      # optional, required as X-Api-Key header on /send requests
 LOG_LEVEL=INFO
 ```
