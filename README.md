@@ -8,14 +8,49 @@ Signal app → signal-cli (WebSocket) → signal-router → your webhook (n8n, e
 
 ## Quick start (pre-built image)
 
+Create a `docker-compose.yml` with the following content:
+
+```yaml
+services:
+  signal-cli:
+    image: ghcr.io/asamk/signal-cli:latest-native
+    restart: unless-stopped
+    command: >
+      -a ${SIGNAL_PHONE_NUMBER}
+      daemon --http 0.0.0.0:8080
+    volumes:
+      - signal-data:/var/lib/signal-cli
+    networks:
+      - signal-net
+
+  signal-router:
+    image: ghcr.io/phieb/signal-router:latest
+    restart: unless-stopped
+    environment:
+      SIGNAL_CLI_URL: ws://signal-cli:8080
+      SIGNAL_PHONE_NUMBER: ${SIGNAL_PHONE_NUMBER}
+      WEBHOOK_URLS: ${WEBHOOK_URLS}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      ALLOWED_SENDERS: ${ALLOWED_SENDERS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      - signal-cli
+    networks:
+      - signal-net
+
+volumes:
+  signal-data:
+
+networks:
+  signal-net:
+```
+
+Then register and start:
+
 ```bash
-curl -O https://raw.githubusercontent.com/phieb/signal-router/main/docker-compose.example.yml
-curl -O https://raw.githubusercontent.com/phieb/signal-router/main/.env.example
-cp .env.example .env
-# edit .env, then:
-docker compose -f docker-compose.example.yml run --rm signal-cli -a +43XXXXXXXXX register
-docker compose -f docker-compose.example.yml run --rm signal-cli -a +43XXXXXXXXX verify 123456
-docker compose -f docker-compose.example.yml up -d
+docker compose run --rm signal-cli -a +43XXXXXXXXX register
+docker compose run --rm signal-cli -a +43XXXXXXXXX verify 123456
+docker compose up -d
 ```
 
 ## Development setup (build from source)
