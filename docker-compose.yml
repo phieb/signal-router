@@ -20,10 +20,9 @@ services:
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
       ALLOWLIST_SENDERS: ${ALLOWLIST_SENDERS:-}
       API_KEY: ${API_KEY:-}
-      SEND_PORT: ${SEND_PORT:-8080}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
-      - "${SEND_PORT:-8080}:${SEND_PORT:-8080}"
+      - "8081:8081"
     volumes:
       - router-data:/data
     depends_on:

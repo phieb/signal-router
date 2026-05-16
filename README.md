@@ -34,10 +34,9 @@ services:
       WEBHOOK_SECRET: ""         # optional, sent as X-Webhook-Secret header
       ALLOWED_SENDERS: ""        # optional, comma-separated e.g. "+43111,+43222"
       API_KEY: ""                # optional, required as X-Api-Key header on /send
-      SEND_PORT: "8080"         # port exposed to the host; independent of signal-cli's internal port
       LOG_LEVEL: INFO
     ports:
-      - "8080:8080"
+      - "8081:8081"
     depends_on:
       - signal-cli
     networks:
@@ -81,11 +80,10 @@ WEBHOOK_URLS=http://n8n:5678/webhook/signal
 WEBHOOK_SECRET=               # optional, sent as X-Webhook-Secret header when forwarding
 ALLOWED_SENDERS=              # optional, comma-separated whitelist e.g. +43111,+43222
 API_KEY=                      # optional, required as X-Api-Key header on /send requests
-SEND_PORT=8080                # port the send API listens on (independent of signal-cli's internal port)
 LOG_LEVEL=INFO
 ```
 
-> **Port note:** The port in signal-cli's `daemon --http 0.0.0.0:<port>` command and in `SIGNAL_CLI_URL` must always match — they refer to the same internal listener. `SEND_PORT` is separate and only controls what port the router's `/send` API binds to on the host.
+> **Port note:** The port in signal-cli's `daemon --http 0.0.0.0:<port>` command and in `SIGNAL_CLI_URL` must always match — they refer to the same internal listener. The send API always listens on 8081 (a different port) and is not configurable.
 
 ## Connecting a number
 
@@ -126,7 +124,7 @@ Signal sends a verification code via SMS. After verifying, start the services no
 The router exposes a `POST /send` endpoint so other services (e.g. n8n) can send Signal messages without talking to signal-cli directly.
 
 ```bash
-curl -X POST http://localhost:8080/send \
+curl -X POST http://localhost:8081/send \
   -H "Content-Type: application/json" \
   -H "X-Api-Key: your_api_key" \
   -d '{"to": "+43111222333", "message": "Hello from n8n!"}'
@@ -134,7 +132,7 @@ curl -X POST http://localhost:8080/send \
 
 `to` can be a single number or a list of numbers. If `API_KEY` is not set, the endpoint is unauthenticated.
 
-From another Docker container on the same network, use `http://signal-router:8080/send` as the URL.
+From another Docker container on the same network, use `http://signal-router:8081/send` as the URL.
 
 ## Managing the sender allowlist
 
@@ -144,16 +142,16 @@ The allowlist is stored in `/data/senders.json` (persisted via the `router-data`
 
 ```bash
 # list current allowlist
-curl http://localhost:8080/senders -H "X-Api-Key: your_api_key"
+curl http://localhost:8081/senders -H "X-Api-Key: your_api_key"
 
 # add a number
-curl -X POST http://localhost:8080/senders \
+curl -X POST http://localhost:8081/senders \
   -H "Content-Type: application/json" \
   -H "X-Api-Key: your_api_key" \
   -d '{"number": "+43111222333"}'
 
 # remove a number (URL-encode the + as %2B)
-curl -X DELETE http://localhost:8080/senders/%2B43111222333 \
+curl -X DELETE http://localhost:8081/senders/%2B43111222333 \
   -H "X-Api-Key: your_api_key"
 ```
 

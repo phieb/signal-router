@@ -24,7 +24,7 @@ SIGNAL_PHONE_NUMBER = os.environ["SIGNAL_PHONE_NUMBER"]
 WEBHOOK_URLS = [u.strip() for u in os.environ["WEBHOOK_URLS"].split(",") if u.strip()]
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 API_KEY = os.getenv("API_KEY", "")
-SEND_PORT = int(os.getenv("SEND_PORT", "8080"))
+SEND_PORT = 8081
 SENDERS_FILE = Path(os.getenv("SENDERS_FILE", "/data/senders.json"))
 ALLOWLIST_SENDERS = os.getenv("ALLOWLIST_SENDERS", "").strip().lower() in ("1", "true", "yes")
 

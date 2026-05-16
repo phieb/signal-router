@@ -21,10 +21,9 @@ services:
       WEBHOOK_SECRET: ""         # optional, sent as X-Webhook-Secret header
       ALLOWLIST_SENDERS: "false" # set to "true" to only forward messages from numbers in /senders
       API_KEY: ""                # optional, required as X-Api-Key header on /send
-      SEND_PORT: "8080"         # port exposed to the host; independent of signal-cli's internal port
       LOG_LEVEL: INFO
     ports:
-      - "8080:8080"
+      - "8081:8081"
     volumes:
       - router-data:/data
     depends_on:
