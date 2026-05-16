@@ -29,7 +29,6 @@ services:
     restart: unless-stopped
     environment:
       SIGNAL_CLI_URL: ws://signal-cli:8080  # must match signal-cli's --http port above
-      SIGNAL_PHONE_NUMBER: "+43123456789"
       WEBHOOK_URLS: "http://n8n:5678/webhook/signal"
       WEBHOOK_SECRET: ""         # optional, sent as X-Webhook-Secret header
       ALLOWED_SENDERS: ""        # optional, comma-separated e.g. "+43111,+43222"
@@ -75,7 +74,6 @@ See the [Makefile reference](#makefile-reference) for register/link/verify comma
 Copy `.env.example` to `.env` and fill in your values:
 
 ```env
-SIGNAL_PHONE_NUMBER=+43123456789
 WEBHOOK_URLS=http://n8n:5678/webhook/signal
 WEBHOOK_SECRET=               # optional, sent as X-Webhook-Secret header when forwarding
 ALLOWED_SENDERS=              # optional, comma-separated whitelist e.g. +43111,+43222

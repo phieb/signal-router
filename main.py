@@ -20,7 +20,6 @@ logging.basicConfig(
 log = logging.getLogger("signal-router")
 
 SIGNAL_CLI_URL = os.environ["SIGNAL_CLI_URL"].rstrip("/")
-SIGNAL_PHONE_NUMBER = os.environ["SIGNAL_PHONE_NUMBER"]
 WEBHOOK_URLS = [u.strip() for u in os.environ["WEBHOOK_URLS"].split(",") if u.strip()]
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 API_KEY = os.getenv("API_KEY", "")
@@ -49,7 +48,6 @@ def _save_senders() -> None:
 
 ALLOWED_SENDERS: set[str] = _load_senders()
 
-WS_URL = f"{SIGNAL_CLI_URL}/v1/receive/{SIGNAL_PHONE_NUMBER}"
 SIGNAL_HTTP_URL = SIGNAL_CLI_URL.replace("ws://", "http://").replace("wss://", "https://")
 
 BACKOFF_INITIAL = 1
@@ -57,6 +55,29 @@ BACKOFF_MAX = 60
 BACKOFF_FACTOR = 2
 
 shutdown = asyncio.Event()
+
+
+# ── Startup: discover phone number from signal-cli ───────────────────────────
+
+async def discover_phone_number() -> str:
+    backoff = BACKOFF_INITIAL
+    while True:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{SIGNAL_HTTP_URL}/v1/accounts",
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as resp:
+                    data = await resp.json()
+                    if data:
+                        number = data[0]
+                        log.info("discovered phone number: %s", number)
+                        return number
+                    log.warning("signal-cli returned empty accounts list, retrying in %ds", backoff)
+        except Exception as exc:
+            log.warning("could not reach signal-cli: %s — retrying in %ds", exc, backoff)
+        await asyncio.sleep(backoff)
+        backoff = min(backoff * BACKOFF_FACTOR, BACKOFF_MAX)
 
 
 # ── Receive: WebSocket → webhooks ─────────────────────────────────────────────
@@ -103,13 +124,14 @@ async def handle_messages(ws, session: aiohttp.ClientSession) -> None:
         await forward(session, envelope)
 
 
-async def run_receiver() -> None:
+async def run_receiver(phone_number: str) -> None:
+    ws_url = f"{SIGNAL_CLI_URL}/v1/receive/{phone_number}"
     backoff = BACKOFF_INITIAL
     async with aiohttp.ClientSession() as session:
         while not shutdown.is_set():
             try:
-                log.info("connecting to %s", WS_URL)
-                async with websockets.connect(WS_URL, ping_interval=30, ping_timeout=10) as ws:
+                log.info("connecting to %s", ws_url)
+                async with websockets.connect(ws_url, ping_interval=30, ping_timeout=10) as ws:
                     log.info("connected")
                     backoff = BACKOFF_INITIAL
                     await handle_messages(ws, session)
@@ -153,7 +175,7 @@ async def handle_send(request: aiohttp.web.Request) -> aiohttp.web.Response:
     async with aiohttp.ClientSession() as session:
         payload = {
             "message": message,
-            "number": SIGNAL_PHONE_NUMBER,
+            "number": request.app["phone_number"],
             "recipients": recipients,
         }
         try:
@@ -204,8 +226,9 @@ async def handle_senders_delete(request: aiohttp.web.Request) -> aiohttp.web.Res
     return aiohttp.web.json_response({"removed": number, "senders": sorted(ALLOWED_SENDERS)})
 
 
-async def run_sender() -> None:
+async def run_sender(phone_number: str) -> None:
     app = aiohttp.web.Application()
+    app["phone_number"] = phone_number
     app.router.add_post("/send", handle_send)
     app.router.add_get("/senders", handle_senders_get)
     app.router.add_post("/senders", handle_senders_post)
@@ -239,16 +262,19 @@ def main() -> None:
     elif not ALLOWED_SENDERS:
         log.warning("ALLOWLIST_SENDERS is active but senders.json is empty — no messages will be forwarded")
 
-    log.info(
-        "signal-router starting | phone=%s webhooks=%d allowlist=%s senders=%d send_port=%d",
-        SIGNAL_PHONE_NUMBER,
-        len(WEBHOOK_URLS),
-        "on" if ALLOWLIST_SENDERS else "off",
-        len(ALLOWED_SENDERS),
-        SEND_PORT,
-    )
+    async def _run() -> None:
+        phone_number = await discover_phone_number()
+        log.info(
+            "signal-router starting | phone=%s webhooks=%d allowlist=%s senders=%d send_port=%d",
+            phone_number,
+            len(WEBHOOK_URLS),
+            "on" if ALLOWLIST_SENDERS else "off",
+            len(ALLOWED_SENDERS),
+            SEND_PORT,
+        )
+        await asyncio.gather(run_receiver(phone_number), run_sender(phone_number))
 
-    asyncio.run(asyncio.gather(run_receiver(), run_sender()))
+    asyncio.run(_run())
     log.info("shutdown complete")
 
 

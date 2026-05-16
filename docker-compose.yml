@@ -15,7 +15,6 @@ services:
     restart: unless-stopped
     environment:
       SIGNAL_CLI_URL: ws://signal-cli:8080
-      SIGNAL_PHONE_NUMBER: ${SIGNAL_PHONE_NUMBER}
       WEBHOOK_URLS: ${WEBHOOK_URLS}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
       ALLOWLIST_SENDERS: ${ALLOWLIST_SENDERS:-}
