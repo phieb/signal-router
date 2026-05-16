@@ -15,6 +15,7 @@ services:
   signal-cli:
     image: ghcr.io/asamk/signal-cli:latest-native
     restart: unless-stopped
+    # The port in `daemon --http` must match the port in SIGNAL_CLI_URL below.
     command: >
       -a +43123456789
       daemon --http 0.0.0.0:8080
@@ -27,13 +28,13 @@ services:
     image: ghcr.io/phieb/signal-router:latest
     restart: unless-stopped
     environment:
-      SIGNAL_CLI_URL: ws://signal-cli:8080
+      SIGNAL_CLI_URL: ws://signal-cli:8080  # must match signal-cli's --http port above
       SIGNAL_PHONE_NUMBER: "+43123456789"
       WEBHOOK_URLS: "http://n8n:5678/webhook/signal"
       WEBHOOK_SECRET: ""         # optional, sent as X-Webhook-Secret header
       ALLOWED_SENDERS: ""        # optional, comma-separated e.g. "+43111,+43222"
       API_KEY: ""                # optional, required as X-Api-Key header on /send
-      SEND_PORT: "8080"
+      SEND_PORT: "8080"         # port exposed to the host; independent of signal-cli's internal port
       LOG_LEVEL: INFO
     ports:
       - "8080:8080"
@@ -80,9 +81,11 @@ WEBHOOK_URLS=http://n8n:5678/webhook/signal
 WEBHOOK_SECRET=               # optional, sent as X-Webhook-Secret header when forwarding
 ALLOWED_SENDERS=              # optional, comma-separated whitelist e.g. +43111,+43222
 API_KEY=                      # optional, required as X-Api-Key header on /send requests
-SEND_PORT=8080                # port the send API listens on
+SEND_PORT=8080                # port the send API listens on (independent of signal-cli's internal port)
 LOG_LEVEL=INFO
 ```
+
+> **Port note:** The port in signal-cli's `daemon --http 0.0.0.0:<port>` command and in `SIGNAL_CLI_URL` must always match — they refer to the same internal listener. `SEND_PORT` is separate and only controls what port the router's `/send` API binds to on the host.
 
 ## Connecting a number
 
