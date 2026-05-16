@@ -28,15 +28,15 @@ services:
     restart: unless-stopped
     environment:
       SIGNAL_CLI_URL: ws://signal-cli:8080
-      SIGNAL_PHONE_NUMBER: ${SIGNAL_PHONE_NUMBER}
-      WEBHOOK_URLS: ${WEBHOOK_URLS}
-      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
-      ALLOWED_SENDERS: ${ALLOWED_SENDERS:-}
-      API_KEY: ${API_KEY:-}
-      SEND_PORT: ${SEND_PORT:-8080}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SIGNAL_PHONE_NUMBER: "+43123456789"
+      WEBHOOK_URLS: "http://n8n:5678/webhook/signal"
+      WEBHOOK_SECRET: ""         # optional, sent as X-Webhook-Secret header
+      ALLOWED_SENDERS: ""        # optional, comma-separated e.g. "+43111,+43222"
+      API_KEY: ""                # optional, required as X-Api-Key header on /send
+      SEND_PORT: "8080"
+      LOG_LEVEL: INFO
     ports:
-      - "${SEND_PORT:-8080}:${SEND_PORT:-8080}"
+      - "8080:8080"
     depends_on:
       - signal-cli
     networks:
